@@ -34,7 +34,9 @@ if [ ! -f "${ONEAPI_DIR}/setvars.sh" ]; then
 fi
 
 echo "Loading oneAPI environment..."
-source "${ONEAPI_DIR}/setvars.sh" > /dev/null 2>&1
+set +e
+source "${ONEAPI_DIR}/setvars.sh"
+set -e
 
 if [ -z "$MKLROOT" ]; then
     echo "ERROR: Failed to load oneAPI environment (MKLROOT not set)"
