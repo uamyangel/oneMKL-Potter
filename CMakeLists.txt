@@ -55,6 +55,13 @@ endif()
 
 file(GLOB_RECURSE SRC_FILES ${PATH_SRC}/*.cpp)
 
+# =============================================================================
+# Third-party Library Configuration - capnproto
+# =============================================================================
+# Disable capnproto tests to avoid compatibility issues with Intel compiler
+# We only need the capnproto library, not its tests
+set(BUILD_TESTING OFF CACHE BOOL "Disable capnproto tests" FORCE)
+
 add_subdirectory(${PATH_LIB}/capnproto)
 
 # Find required libraries
