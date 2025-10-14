@@ -39,16 +39,29 @@ set(PATH_LIB ${PROJECT_SOURCE_DIR}/libs)
 # Intel Compiler Optimization Flags
 # =============================================================================
 # Apply aggressive optimizations when using Intel compilers in Release mode
+# Note: icpx (IntelLLVM) and icpc (Intel Classic) use different flags
 if(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
     message(STATUS "Detected Intel compiler: ${CMAKE_CXX_COMPILER_ID}")
 
-    # Release mode optimizations
+    # Common optimizations for both icpx and icpc
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")        # Maximum optimization
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -xHost")     # Optimize for current CPU
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ipo")       # Interprocedural optimization
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -no-prec-div")  # Fast division
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -fp-model fast=2")  # Fast floating point
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -qopt-prefetch")  # Enable prefetching
+
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+        # icpx: Intel LLVM-based compiler (modern, uses Clang-like flags)
+        message(STATUS "Using Intel LLVM compiler (icpx) optimization flags")
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native")  # Optimize for current CPU
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math")    # Fast floating point
+        # Note: -flto for LTO, but can cause issues with large projects, so commented out
+        # set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto")
+    else()
+        # icpc: Intel Classic compiler (legacy, uses traditional Intel flags)
+        message(STATUS "Using Intel Classic compiler (icpc) optimization flags")
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -xHost")         # Optimize for current CPU
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ipo")           # Interprocedural optimization
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -no-prec-div")   # Fast division
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -fp-model fast=2")  # Fast floating point
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -qopt-prefetch") # Enable prefetching
+    endif()
 
     message(STATUS "Intel compiler optimization flags: ${CMAKE_CXX_FLAGS_RELEASE}")
 endif()
