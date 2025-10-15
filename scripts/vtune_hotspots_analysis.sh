@@ -170,23 +170,72 @@ echo "==========================================================================
 # Build the command
 ROUTE_CMD="./build/route -i $BENCHMARK_PATH -o $OUTPUT_FILE -t $THREADS"
 
-echo "Command: vtune -collect hotspots -result-dir $RESULT_DIR -- $ROUTE_CMD"
+# Detect if running in virtualized environment
+IS_VIRTUALIZED=false
+if systemd-detect-virt &> /dev/null; then
+    VIRT_TYPE=$(systemd-detect-virt)
+    if [ "$VIRT_TYPE" != "none" ]; then
+        IS_VIRTUALIZED=true
+        echo "⚠️  Virtualized environment detected: $VIRT_TYPE"
+        echo "   Hardware performance counters may not be available"
+        echo "   Using software sampling mode (user-mode timing)..."
+        echo ""
+    fi
+fi
+
+# Try hardware sampling first, fallback to software if it fails
+SAMPLING_MODE="hw"
+if [ "$IS_VIRTUALIZED" = true ]; then
+    SAMPLING_MODE="sw"
+fi
+
+echo "Sampling mode: $SAMPLING_MODE"
+echo "Command: vtune -collect hotspots -knob sampling-mode=$SAMPLING_MODE -result-dir $RESULT_DIR -- $ROUTE_CMD"
 echo "============================================================================="
 echo ""
 
-# Run vTune with hardware event-based sampling for accurate hotspot detection
+# Run vTune with appropriate sampling mode
 # Options explained:
 #   -collect hotspots: Run hotspot analysis to find time-consuming functions
-#   -knob sampling-mode=hw: Use hardware event-based sampling (most accurate)
+#   -knob sampling-mode=hw/sw: Hardware (accurate) or software (VMware-compatible)
 #   -knob enable-stack-collection=true: Collect call stacks for better context
 #   -result-dir: Directory to store results
 vtune -collect hotspots \
-      -knob sampling-mode=hw \
+      -knob sampling-mode=$SAMPLING_MODE \
       -knob enable-stack-collection=true \
       -result-dir "$RESULT_DIR" \
       -- $ROUTE_CMD
 
 VTUNE_EXIT_CODE=$?
+
+# If hardware sampling failed, retry with software sampling
+if [ $VTUNE_EXIT_CODE -ne 0 ] && [ "$SAMPLING_MODE" = "hw" ]; then
+    echo ""
+    echo "⚠️  Hardware sampling failed, retrying with software sampling..."
+    echo "   (This is common in virtualized environments like VMware/VirtualBox)"
+    echo ""
+    
+    # Clean failed results
+    rm -rf "$RESULT_DIR"
+    
+    echo "Command: vtune -collect hotspots -knob sampling-mode=sw -result-dir $RESULT_DIR -- $ROUTE_CMD"
+    echo "============================================================================="
+    echo ""
+    
+    vtune -collect hotspots \
+          -knob sampling-mode=sw \
+          -knob enable-stack-collection=true \
+          -result-dir "$RESULT_DIR" \
+          -- $ROUTE_CMD
+    
+    VTUNE_EXIT_CODE=$?
+    
+    if [ $VTUNE_EXIT_CODE -eq 0 ]; then
+        echo ""
+        echo "✓ Software sampling succeeded!"
+        echo "  Note: Results may be less accurate than hardware sampling"
+    fi
+fi
 
 echo ""
 echo "============================================================================="
