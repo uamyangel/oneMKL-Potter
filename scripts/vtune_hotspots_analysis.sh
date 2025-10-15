@@ -1,0 +1,264 @@
+#!/bin/bash
+
+# =============================================================================
+# Intel vTune Hotspots Analysis Script for Potter Router
+# =============================================================================
+# This script runs Intel vTune Profiler in Hotspots mode to identify
+# performance bottlenecks (functions/lines consuming the most CPU time).
+#
+# Prerequisites:
+#   1. Potter must be built with Profiling mode (run ./build_for_profiling.sh)
+#   2. Intel oneAPI environment must be loaded (includes vTune)
+#   3. Sufficient disk space for results (~100-500MB)
+#
+# Usage:
+#   ./vtune_hotspots_analysis.sh [benchmark] [threads]
+#
+# Arguments:
+#   benchmark  - Input benchmark file (default: boom_med_pb_unrouted.phys)
+#   threads    - Number of threads (default: 32)
+#
+# Examples:
+#   ./vtune_hotspots_analysis.sh
+#   ./vtune_hotspots_analysis.sh boom_med_pb_unrouted.phys 64
+#   ./vtune_hotspots_analysis.sh logicnets_jscl_unrouted.phys 32
+#
+# Output:
+#   - Results directory: ./vtune_results/
+#   - Summary file: ./vtune_analysis_summary.txt
+# =============================================================================
+
+set -e  # Exit on error
+
+# Default settings
+BENCHMARK="${1:-boom_med_pb_unrouted.phys}"
+THREADS="${2:-32}"
+RESULT_DIR="vtune_results"
+BENCHMARK_DIR="benchmarks"
+OUTPUT_FILE="run/vtune_profiling_output.phys"
+
+# Ensure output directory exists
+mkdir -p run
+
+echo "============================================================================="
+echo "Intel vTune Profiler - Hotspots Analysis"
+echo "============================================================================="
+echo ""
+echo "Configuration:"
+echo "  Benchmark: $BENCHMARK"
+echo "  Threads: $THREADS"
+echo "  Results directory: $RESULT_DIR"
+echo ""
+
+# =============================================================================
+# 1. Environment checks
+# =============================================================================
+echo "[1/5] Checking environment..."
+
+# Check if oneAPI is loaded
+if [ -z "$ONEAPI_ROOT" ]; then
+    echo "⚠️  Warning: ONEAPI_ROOT not set, attempting to load oneAPI..."
+
+    ONEAPI_PATHS=(
+        "/opt/intel/oneapi/setvars.sh"
+        "$HOME/intel/oneapi/setvars.sh"
+        "/usr/local/intel/oneapi/setvars.sh"
+    )
+
+    ONEAPI_FOUND=false
+    for path in "${ONEAPI_PATHS[@]}"; do
+        if [ -f "$path" ]; then
+            echo "Loading oneAPI from: $path"
+            source "$path" --force
+            ONEAPI_FOUND=true
+            break
+        fi
+    done
+
+    if [ "$ONEAPI_FOUND" = false ]; then
+        echo ""
+        echo "ERROR: Intel oneAPI not found!"
+        echo "Please run: source /opt/intel/oneapi/setvars.sh"
+        exit 1
+    fi
+fi
+
+# Check if vTune is available
+if ! command -v vtune &> /dev/null; then
+    echo "ERROR: Intel vTune not found in PATH"
+    echo "Please ensure Intel oneAPI Base Toolkit is installed and environment is loaded."
+    echo "Run: source /opt/intel/oneapi/setvars.sh"
+    exit 1
+fi
+
+echo "✓ Intel vTune found: $(which vtune)"
+
+# Get vTune version
+VTUNE_VERSION=$(vtune --version 2>&1 | head -1)
+echo "✓ vTune version: $VTUNE_VERSION"
+
+# =============================================================================
+# 2. Check executable
+# =============================================================================
+echo ""
+echo "[2/5] Checking executable..."
+
+if [ ! -f "build/route" ]; then
+    echo "ERROR: build/route not found"
+    echo "Please build Potter with profiling mode first:"
+    echo "  ./scripts/build_for_profiling.sh"
+    exit 1
+fi
+
+echo "✓ Executable found: build/route"
+
+# Check if executable has debug symbols
+if file build/route | grep -q "not stripped"; then
+    echo "✓ Debug symbols present (good for source-level analysis)"
+else
+    echo "⚠️  Warning: Debug symbols may be missing"
+    echo "   Consider rebuilding with: ./scripts/build_for_profiling.sh clean"
+fi
+
+# Check if build is optimized (warn if it is)
+if strings build/route | grep -q "O3"; then
+    echo "⚠️  Warning: Executable may be optimized (-O3)"
+    echo "   For best profiling results, use -O0 (Profiling build mode)"
+fi
+
+# =============================================================================
+# 3. Check benchmark file
+# =============================================================================
+echo ""
+echo "[3/5] Checking benchmark file..."
+
+BENCHMARK_PATH="$BENCHMARK_DIR/$BENCHMARK"
+if [ ! -f "$BENCHMARK_PATH" ]; then
+    echo "ERROR: Benchmark file not found: $BENCHMARK_PATH"
+    echo "Available benchmarks:"
+    ls -1 "$BENCHMARK_DIR"/*.phys 2>/dev/null || echo "  (none found)"
+    exit 1
+fi
+
+BENCHMARK_SIZE=$(ls -lh "$BENCHMARK_PATH" | awk '{print $5}')
+echo "✓ Benchmark file found: $BENCHMARK_PATH ($BENCHMARK_SIZE)"
+
+# =============================================================================
+# 4. Clean old results
+# =============================================================================
+echo ""
+echo "[4/5] Preparing results directory..."
+
+if [ -d "$RESULT_DIR" ]; then
+    echo "⚠️  Existing results directory found, removing..."
+    rm -rf "$RESULT_DIR"
+fi
+
+echo "✓ Results directory ready: $RESULT_DIR"
+
+# =============================================================================
+# 5. Run vTune Hotspots analysis
+# =============================================================================
+echo ""
+echo "[5/5] Running vTune Hotspots analysis..."
+echo ""
+echo "⏱️  This will take 5-15 minutes (program will run slower during profiling)"
+echo "   Progress updates will appear below..."
+echo ""
+echo "============================================================================="
+
+# Build the command
+ROUTE_CMD="./build/route -i $BENCHMARK_PATH -o $OUTPUT_FILE -t $THREADS"
+
+echo "Command: vtune -collect hotspots -result-dir $RESULT_DIR -- $ROUTE_CMD"
+echo "============================================================================="
+echo ""
+
+# Run vTune with hardware event-based sampling for accurate hotspot detection
+# Options explained:
+#   -collect hotspots: Run hotspot analysis to find time-consuming functions
+#   -knob sampling-mode=hw: Use hardware event-based sampling (most accurate)
+#   -knob enable-stack-collection=true: Collect call stacks for better context
+#   -result-dir: Directory to store results
+vtune -collect hotspots \
+      -knob sampling-mode=hw \
+      -knob enable-stack-collection=true \
+      -result-dir "$RESULT_DIR" \
+      -- $ROUTE_CMD
+
+VTUNE_EXIT_CODE=$?
+
+echo ""
+echo "============================================================================="
+
+if [ $VTUNE_EXIT_CODE -ne 0 ]; then
+    echo "ERROR: vTune analysis failed (exit code: $VTUNE_EXIT_CODE)"
+    echo ""
+    echo "Common issues:"
+    echo "  - Insufficient permissions (try: sudo sysctl -w kernel.perf_event_paranoid=0)"
+    echo "  - Out of disk space"
+    echo "  - Application crashed during profiling"
+    exit 1
+fi
+
+echo "✓ vTune analysis completed successfully!"
+echo "============================================================================="
+
+# =============================================================================
+# Generate quick summary
+# =============================================================================
+echo ""
+echo "Generating summary report..."
+
+# Get total execution time from vTune
+SUMMARY_FILE="vtune_analysis_summary.txt"
+
+cat > "$SUMMARY_FILE" << EOF
+================================================================================
+Intel vTune Hotspots Analysis Summary
+================================================================================
+Date: $(date)
+Benchmark: $BENCHMARK
+Threads: $THREADS
+Results Directory: $RESULT_DIR
+================================================================================
+
+EOF
+
+# Extract basic statistics from vTune
+vtune -report summary -result-dir "$RESULT_DIR" -format text >> "$SUMMARY_FILE" 2>&1 || true
+
+echo "✓ Summary saved to: $SUMMARY_FILE"
+
+# =============================================================================
+# Final instructions
+# =============================================================================
+echo ""
+echo "============================================================================="
+echo "✓ vTune analysis complete!"
+echo "============================================================================="
+echo ""
+echo "Results location: $RESULT_DIR/"
+echo "Quick summary: $SUMMARY_FILE"
+echo ""
+echo "Next steps:"
+echo ""
+echo "  1. Extract TOP3 bottlenecks (recommended):"
+echo "     ./scripts/analyze_vtune_top3.sh"
+echo ""
+echo "  2. View detailed report in terminal:"
+echo "     vtune -report hotspots -result-dir $RESULT_DIR"
+echo ""
+echo "  3. Open GUI for interactive analysis:"
+echo "     vtune-gui $RESULT_DIR"
+echo ""
+echo "  4. Export specific reports:"
+echo "     vtune -report hotspots -result-dir $RESULT_DIR -format text -report-output hotspots.txt"
+echo "     vtune -report hotspots -result-dir $RESULT_DIR -group-by source-line -format text -report-output hotspots_by_line.txt"
+echo ""
+echo "============================================================================="
+echo ""
+echo "Disk space used:"
+du -sh "$RESULT_DIR"
+echo ""
+echo "============================================================================="

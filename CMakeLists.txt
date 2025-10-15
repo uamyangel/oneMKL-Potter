@@ -66,6 +66,29 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
     message(STATUS "Intel compiler optimization flags: ${CMAKE_CXX_FLAGS_RELEASE}")
 endif()
 
+# =============================================================================
+# Profiling Build Mode (for vTune and performance analysis)
+# =============================================================================
+# This mode disables all optimizations to make performance bottlenecks
+# more visible in profiling tools like Intel vTune Profiler.
+#
+# Usage: cmake -B build -DCMAKE_BUILD_TYPE=Profiling .
+#
+# Flags explanation:
+#   -O0: No optimization (default behavior, easier to identify bottlenecks)
+#   -g: Full debug symbols (allows vTune to map to source code)
+#   -fno-inline: Disable function inlining (shows true call hierarchy)
+#   -fno-omit-frame-pointer: Keep frame pointers (better call stack traces)
+#
+set(CMAKE_CXX_FLAGS_PROFILING "-O0 -g -fno-inline -fno-omit-frame-pointer")
+
+# For Intel compilers, add additional debugging info
+if(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
+    set(CMAKE_CXX_FLAGS_PROFILING "${CMAKE_CXX_FLAGS_PROFILING} -debug inline-debug-info")
+endif()
+
+message(STATUS "Profiling build flags: ${CMAKE_CXX_FLAGS_PROFILING}")
+
 file(GLOB_RECURSE SRC_FILES ${PATH_SRC}/*.cpp)
 
 # =============================================================================
