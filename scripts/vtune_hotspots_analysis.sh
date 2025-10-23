@@ -60,7 +60,7 @@ if [ -z "$ONEAPI_ROOT" ]; then
     echo "⚠️  Warning: ONEAPI_ROOT not set, attempting to load oneAPI..."
 
     ONEAPI_PATHS=(
-        "/opt/intel/oneapi/setvars.sh"
+        "/xrepo/App/oneAPI/setvars.sh"
         "$HOME/intel/oneapi/setvars.sh"
         "/usr/local/intel/oneapi/setvars.sh"
     )
@@ -78,7 +78,7 @@ if [ -z "$ONEAPI_ROOT" ]; then
     if [ "$ONEAPI_FOUND" = false ]; then
         echo ""
         echo "ERROR: Intel oneAPI not found!"
-        echo "Please run: source /opt/intel/oneapi/setvars.sh"
+        echo "Please run: source /xrepo/App/oneAPI/setvars.sh"
         exit 1
     fi
 fi
@@ -87,7 +87,7 @@ fi
 if ! command -v vtune &> /dev/null; then
     echo "ERROR: Intel vTune not found in PATH"
     echo "Please ensure Intel oneAPI Base Toolkit is installed and environment is loaded."
-    echo "Run: source /opt/intel/oneapi/setvars.sh"
+    echo "Run: source /xrepo/App/oneAPI/setvars.sh"
     exit 1
 fi
 
@@ -98,10 +98,64 @@ VTUNE_VERSION=$(vtune --version 2>&1 | head -1)
 echo "✓ vTune version: $VTUNE_VERSION"
 
 # =============================================================================
+# Configure system for vTune profiling
+# =============================================================================
+echo ""
+echo "Configuring system for vTune profiling..."
+
+# Check current perf_event_paranoid setting
+CURRENT_PARANOID=$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null || echo "unknown")
+echo "Current perf_event_paranoid: $CURRENT_PARANOID"
+
+if [ "$CURRENT_PARANOID" != "unknown" ] && [ "$CURRENT_PARANOID" -gt 1 ]; then
+    echo "⚠️  perf_event_paranoid is too restrictive ($CURRENT_PARANOID > 1)"
+    echo "   Attempting to set it to 1 (requires sudo)..."
+    echo "   This enables kernel-level performance monitoring"
+    
+    if sudo sh -c 'echo 1 > /proc/sys/kernel/perf_event_paranoid' 2>/dev/null; then
+        echo "✓ Successfully set perf_event_paranoid to 1"
+    else
+        echo "⚠️  Failed to set perf_event_paranoid (continuing with current value)"
+        echo "   You may need to run: sudo sh -c 'echo 1 > /proc/sys/kernel/perf_event_paranoid'"
+    fi
+fi
+
+# Check and configure kptr_restrict for better kernel symbol resolution
+CURRENT_KPTR=$(cat /proc/sys/kernel/kptr_restrict 2>/dev/null || echo "unknown")
+echo "Current kptr_restrict: $CURRENT_KPTR"
+
+if [ "$CURRENT_KPTR" != "0" ] && [ "$CURRENT_KPTR" != "unknown" ]; then
+    echo "⚠️  kptr_restrict restricts kernel symbol access"
+    echo "   Attempting to set it to 0 for better profiling results..."
+    
+    if sudo sh -c 'echo 0 > /proc/sys/kernel/kptr_restrict' 2>/dev/null; then
+        echo "✓ Successfully set kptr_restrict to 0"
+    else
+        echo "⚠️  Failed to set kptr_restrict (kernel symbols may not be fully resolved)"
+    fi
+fi
+
+# Set stack size limit (required by vTune)
+echo ""
+echo "Configuring stack size limit..."
+CURRENT_STACK=$(ulimit -s)
+echo "Current stack size: $CURRENT_STACK KB"
+
+# vTune requires finite stack size in driverless mode (not unlimited)
+# Set to 8192 KB (8 MB) which is sufficient for most applications
+if [ "$CURRENT_STACK" = "unlimited" ]; then
+    echo "Setting stack size to 8192 KB (8 MB) for vTune compatibility..."
+    ulimit -s 8192
+    echo "✓ Stack size set to 8192 KB"
+else
+    echo "✓ Stack size is finite ($CURRENT_STACK KB), suitable for vTune"
+fi
+
+# =============================================================================
 # 2. Check executable
 # =============================================================================
 echo ""
-echo "[2/5] Checking executable..."
+echo "[2/6] Checking executable..."
 
 if [ ! -f "build/route" ]; then
     echo "ERROR: build/route not found"
@@ -130,7 +184,7 @@ fi
 # 3. Check benchmark file
 # =============================================================================
 echo ""
-echo "[3/5] Checking benchmark file..."
+echo "[3/6] Checking benchmark file..."
 
 BENCHMARK_PATH="$BENCHMARK_DIR/$BENCHMARK"
 if [ ! -f "$BENCHMARK_PATH" ]; then
@@ -147,7 +201,7 @@ echo "✓ Benchmark file found: $BENCHMARK_PATH ($BENCHMARK_SIZE)"
 # 4. Clean old results
 # =============================================================================
 echo ""
-echo "[4/5] Preparing results directory..."
+echo "[4/6] Preparing results directory..."
 
 if [ -d "$RESULT_DIR" ]; then
     echo "⚠️  Existing results directory found, removing..."
@@ -157,18 +211,10 @@ fi
 echo "✓ Results directory ready: $RESULT_DIR"
 
 # =============================================================================
-# 5. Run vTune Hotspots analysis
+# 5. Detect virtualization
 # =============================================================================
 echo ""
-echo "[5/5] Running vTune Hotspots analysis..."
-echo ""
-echo "⏱️  This will take 5-15 minutes (program will run slower during profiling)"
-echo "   Progress updates will appear below..."
-echo ""
-echo "============================================================================="
-
-# Build the command
-ROUTE_CMD="./build/route -i $BENCHMARK_PATH -o $OUTPUT_FILE -t $THREADS"
+echo "[5/6] Detecting environment type..."
 
 # Detect if running in virtualized environment
 IS_VIRTUALIZED=false
@@ -178,12 +224,29 @@ if systemd-detect-virt &> /dev/null; then
         IS_VIRTUALIZED=true
         echo "⚠️  Virtualized environment detected: $VIRT_TYPE"
         echo "   Hardware performance counters may not be available"
-        echo "   Using software sampling mode (user-mode timing)..."
-        echo ""
+        echo "   Will use software sampling mode (user-mode timing)"
+    else
+        echo "✓ Physical machine detected (hardware sampling available)"
     fi
+else
+    echo "✓ Assuming physical machine (systemd-detect-virt not available)"
 fi
 
-# Try hardware sampling first, fallback to software if it fails
+# =============================================================================
+# 6. Run vTune Hotspots analysis
+# =============================================================================
+echo ""
+echo "[6/6] Running vTune Hotspots analysis..."
+echo ""
+echo "⏱️  This will take 5-15 minutes (program will run slower during profiling)"
+echo "   Progress updates will appear below..."
+echo ""
+echo "============================================================================="
+
+# Build the command
+ROUTE_CMD="./build/route -i $BENCHMARK_PATH -o $OUTPUT_FILE -t $THREADS"
+
+# Determine sampling mode based on environment detection
 SAMPLING_MODE="hw"
 if [ "$IS_VIRTUALIZED" = true ]; then
     SAMPLING_MODE="sw"

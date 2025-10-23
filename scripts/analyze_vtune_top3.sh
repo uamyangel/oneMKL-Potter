@@ -51,7 +51,7 @@ echo "[1/4] Checking prerequisites..."
 # Check if vTune is available
 if ! command -v vtune &> /dev/null; then
     echo "ERROR: Intel vTune not found in PATH"
-    echo "Please load oneAPI environment: source /opt/intel/oneapi/setvars.sh"
+    echo "Please load oneAPI environment: source /xrepo/App/oneAPI/setvars.sh"
     exit 1
 fi
 
@@ -68,10 +68,23 @@ fi
 
 echo "✓ Results directory found: $RESULT_DIR"
 
-# Verify it's a valid vTune result
-if [ ! -f "$RESULT_DIR/data.0/systeminfobegin.txt" ] && [ ! -f "$RESULT_DIR/result.db" ]; then
+# Verify it's a valid vTune result (check for common result files/directories)
+VALID_RESULT=false
+if [ -d "$RESULT_DIR/data.0" ] || [ -f "$RESULT_DIR/result.db" ] || [ -f "$RESULT_DIR/result.sqlite" ] || ls "$RESULT_DIR"/*.amplxe &>/dev/null; then
+    VALID_RESULT=true
+fi
+
+# Additional check: try to run a simple vTune command
+if vtune -report summary -result-dir "$RESULT_DIR" &>/dev/null; then
+    VALID_RESULT=true
+fi
+
+if [ "$VALID_RESULT" = false ]; then
     echo "ERROR: Directory does not contain valid vTune results"
     echo "Please check the results directory or re-run the analysis."
+    echo ""
+    echo "Directory contents:"
+    ls -la "$RESULT_DIR" | head -20
     exit 1
 fi
 

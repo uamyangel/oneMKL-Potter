@@ -284,7 +284,7 @@ public:
 	int getHPWL() const { return hpwl;}
 	bool getRouted() const {return isRouted;}
 	bool getRoutedThisIter() const {return isRoutedThisIter;}
-	std::vector<RouteNode*> getRNodes() const {return rnodes;}
+	const std::vector<RouteNode*>& getRNodes() const {return rnodes;}
 	RouteNode* getRNode(int i) const {return rnodes[i];}
 	int getRNodeSize() const {return rnodes.size();}
 	int getSource() const {return source;}

@@ -86,7 +86,7 @@ else
 
     # Common oneAPI installation paths
     ONEAPI_PATHS=(
-        "/opt/intel/oneapi/setvars.sh"
+        "/xrepo/App/oneAPI/setvars.sh"
         "$HOME/intel/oneapi/setvars.sh"
         "/usr/local/intel/oneapi/setvars.sh"
     )

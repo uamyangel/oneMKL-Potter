@@ -64,7 +64,7 @@ public:
 	NodeType getNodeType() const {return type;}
 	bool getIsNodePinBounce() const {return isNodePinBounce;}
 
-	std::vector<RouteNode*> getChildren() const {return children;}
+	const std::vector<RouteNode*>& getChildren() const {return children;}
 	std::vector<RouteNode*>& getChildrenByRef() {return children;}
 	int getChildrenSize() const {return children.size();}
 
