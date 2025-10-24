@@ -269,7 +269,9 @@ public:
 	// 	ymin = ymin_;
 	// 	ymax = ymax_;
 	// }
-	Connection(int id_, int netId_, int source_, int sink_) : id(id_), netId(netId_), source(source_), sink(sink_) {}
+	Connection(int id_, int netId_, int source_, int sink_) : id(id_), netId(netId_), source(source_), sink(sink_) {
+		rnodes.reserve(16);  // Reserve capacity to reduce dynamic reallocations
+	}
 	const utils::BoxT<int>& getBBox() const {return bbox;}
 	int getXMin() const {return xmin;}
 	int getXMax() const {return xmax;}

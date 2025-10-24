@@ -475,8 +475,17 @@ bool aStarRoute::routeOneConnection(int connectionId, int tid, bool sync)
 		return (nodeInfos[lhs->getId()].cost > nodeInfos[rhs->getId()].cost);
 	};
 
+	// Reserve capacity for priority_queue based on connection bbox to reduce reallocations
+	int bbox_width = connection.getXMax() - connection.getXMin() + 1;
+	int bbox_height = connection.getYMax() - connection.getYMin() + 1;
+	int bbox_area = std::max(1, bbox_width * bbox_height);  // Ensure at least 1
+	// Estimate nodes to explore: empirical factor of 10x bbox area, capped at 100k
+	int estimated_nodes = std::min(bbox_area * 10, 100000);
+	std::vector<RouteNode*> pq_container;
+	pq_container.reserve(estimated_nodes);
+
 	// std::priority_queue<int, vector<int>, decltype(nodeInfoComp)> nodeInfoQueue(nodeInfoComp);
-	std::priority_queue<RouteNode*, vector<RouteNode*>, decltype(rnodeComp)> rnodeQueue(rnodeComp);
+	std::priority_queue<RouteNode*, vector<RouteNode*>, decltype(rnodeComp)> rnodeQueue(rnodeComp, std::move(pq_container));
 	int connectionUniqueId = connectionId + connectionIdBase;
 
 	auto push = [&](RouteNode* rnode, RouteNode* prev, double cost, double partialCost, int isTarget) {

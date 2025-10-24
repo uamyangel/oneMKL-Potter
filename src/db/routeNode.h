@@ -10,16 +10,18 @@ class RouteNode
 {
 public:
 	// RouteNode(){}
-	RouteNode(obj_idx id_, short beginTileXCoordinate_, short beginTileYCoordinate_, short endTileXCoordinate_, short endTileYCoordinate_, float baseCost_, short length_, NodeType type_, bool isNodePinBounce_) : 
-		id(id_), 
-		beginTileXCoordinate(beginTileXCoordinate_), 
-		beginTileYCoordinate(beginTileYCoordinate_), 
-		endTileXCoordinate(endTileXCoordinate_), 
-		endTileYCoordinate(endTileYCoordinate_), 
-		baseCost(baseCost_), 
-		length(length_), 
+	RouteNode(obj_idx id_, short beginTileXCoordinate_, short beginTileYCoordinate_, short endTileXCoordinate_, short endTileYCoordinate_, float baseCost_, short length_, NodeType type_, bool isNodePinBounce_) :
+		id(id_),
+		beginTileXCoordinate(beginTileXCoordinate_),
+		beginTileYCoordinate(beginTileYCoordinate_),
+		endTileXCoordinate(endTileXCoordinate_),
+		endTileYCoordinate(endTileYCoordinate_),
+		baseCost(baseCost_),
+		length(length_),
 		type(type_),
-		isNodePinBounce(isNodePinBounce_){}
+		isNodePinBounce(isNodePinBounce_){
+		children.reserve(8);  // Reserve capacity to reduce dynamic reallocations
+	}
 	RouteNode() :
 		id(0),
 		endTileXCoordinate(0),
@@ -35,7 +37,9 @@ public:
 		children(),
 		occupancy(0),
 		presentCongestionCost(1.0f),
-		historicalCongestionCost(1.0f) {}
+		historicalCongestionCost(1.0f) {
+		children.reserve(8);  // Reserve capacity to reduce dynamic reallocations
+	}
 	RouteNode(const RouteNode& that) :
 		id(that.id),
 		endTileXCoordinate(that.endTileXCoordinate),
@@ -152,17 +156,27 @@ private:
     }
 };
 
-class NodeInfo {
-private: 
-	int occChange;
-	int occChangeBatchStamp; // iter * numBatches + batchId
+// Align to 64-byte cacheline to reduce cache misses and false sharing
+class alignas(64) NodeInfo {
 public:
-    RouteNode* prev;
-    double cost;
-    double partialCost;
-	int isVisited;
-    int isTarget;
+    // Hot path data (most frequently accessed, placed first for better cache locality)
+    RouteNode* prev;         // 8 bytes - A* backtracking path, most frequently accessed
+    double cost;             // 8 bytes - Total cost, frequently compared
+    double partialCost;      // 8 bytes - Partial cost
+    int isVisited;           // 4 bytes - Visited flag
+    int isTarget;            // 4 bytes - Target flag
 
+private:
+    // Cold data (less frequently accessed)
+    int occChange;           // 4 bytes
+    int occChangeBatchStamp; // 4 bytes - iter * numBatches + batchId
+
+    // Padding to exactly 64 bytes (one cacheline)
+    // Current: 8+8+8+4+4+4+4 = 40 bytes
+    // Padding: 64-40 = 24 bytes
+    char padding[24];
+
+public:
 	NodeInfo(): prev(nullptr), cost(0), partialCost(0), isVisited(-1), isTarget(-1), occChange(0), occChangeBatchStamp(-1) {}
 
 	void erase() {
@@ -205,3 +219,6 @@ public:
 		}
 	}
 };
+
+// Static assertion to ensure NodeInfo is exactly 64 bytes (one cacheline)
+static_assert(sizeof(NodeInfo) == 64, "NodeInfo must be exactly 64 bytes for optimal cache performance");
