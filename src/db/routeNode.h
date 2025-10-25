@@ -102,12 +102,18 @@ public:
 
 	// methods for usersConnectionCounts
 	// int getOccupancy() const {return occupancy;}
-	int getOccupancy() const {return occupancy.load();}
+	int getOccupancy() const {
+		return occupancy.load(std::memory_order_relaxed);
+	}
 	
 	bool isOverUsed () const {return NODE_CAPACITY < getOccupancy();}
 
-	void incrementOccupancy() {occupancy ++;} 
-	void decrementOccupancy() {occupancy --;}
+	void incrementOccupancy() {
+		occupancy.fetch_add(1, std::memory_order_relaxed);
+	}
+	void decrementOccupancy() {
+		occupancy.fetch_sub(1, std::memory_order_relaxed);
+	}
 
 	void setNeedUpdateBatchStamp(int batchStamp) {needUpdateBatchStamp = batchStamp;}
 	int getNeedUpdateBatchStamp() const {return needUpdateBatchStamp;}
